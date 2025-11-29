@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PulsePost</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="container">
+    <h1>PulsePost</h1>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="text">Text Tweets</button>
+      <button class="tab-btn" data-tab="images">Image Tweets</button>
+    </div>
+
+    <div id="textTab" class="tab-content active">
+      <div class="control-group">
+        <label for="csvInput" class="file-upload">
+          Upload CSV
+          <input type="file" id="csvInput" accept=".csv">
+        </label>
+        <span id="fileName">No file chosen</span>
+      </div>
+    </div>
+
+    <div id="imagesTab" class="tab-content">
+      <div class="control-group">
+        <label for="imageInput" class="file-upload">
+          Select Images (Max 30)
+          <input type="file" id="imageInput" accept="image/*" multiple>
+        </label>
+        <span id="imageCount">0 images selected</span>
+      </div>
+      <div id="imageList" class="image-list"></div>
+    </div>
+
+    <div class="settings">
+      <div class="setting-item">
+        <label>Min Delay (s):</label>
+        <input type="number" id="minDelay" value="29" min="1">
+      </div>
+      <div class="setting-item">
+        <label>Max Delay (s):</label>
+        <input type="number" id="maxDelay" value="70" min="1">
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="startBtn" disabled>Start Posting</button>
+      <button id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div class="status-section">
+      <h3>Status</h3>
+      <div id="status">Idle</div>
+      <div id="progress">Tweets: 0/0</div>
+    </div>
+
+    <div class="logs-section">
+      <h3>Logs <button id="clearLogs" class="small-btn">Clear</button></h3>
+      <div id="logs"></div>
+    </div>
+  </div>
+  <script src="dashboard.js"></script>
+</body>
+
+</html>

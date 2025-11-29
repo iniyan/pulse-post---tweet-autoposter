@@ -1,0 +1,254 @@
+:root {
+  --primary-color: #1d9bf0;
+  --bg-color: #0f1419;
+  --text-color: #f7f9f9;
+  --border-color: #333639;
+  --secondary-bg: #1e2732;
+  --success-color: #00ba7c;
+  --error-color: #f91880;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  margin: 0;
+  padding: 40px;
+  display: flex;
+  justify-content: center;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 600px;
+}
+
+h1 {
+  font-size: 24px;
+  margin: 0;
+  color: var(--primary-color);
+  text-align: center;
+}
+
+h3 {
+  font-size: 14px;
+  margin: 0 0 8px 0;
+  color: #8b98a5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.tab-btn {
+  background: var(--secondary-bg);
+  color: #8b98a5;
+  border-radius: 20px;
+  border: 1px solid transparent;
+}
+
+.tab-btn.active {
+  background: var(--primary-color);
+  color: white;
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--secondary-bg);
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.file-upload {
+  background-color: var(--primary-color);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  transition: opacity 0.2s;
+}
+
+.file-upload:hover {
+  opacity: 0.9;
+}
+
+input[type="file"] {
+  display: none;
+}
+
+#fileName,
+#imageCount {
+  font-size: 12px;
+  color: #8b98a5;
+}
+
+/* Image List */
+.image-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.image-item {
+  display: flex;
+  gap: 10px;
+  background: var(--secondary-bg);
+  padding: 10px;
+  border-radius: 8px;
+  align-items: center;
+}
+
+.image-preview {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.image-caption {
+  flex: 1;
+  background: var(--bg-color);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  padding: 8px;
+  border-radius: 4px;
+  resize: none;
+  height: 40px;
+}
+
+.remove-image {
+  background: none;
+  color: var(--error-color);
+  padding: 4px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.settings {
+  display: flex;
+  gap: 10px;
+}
+
+.setting-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-item label {
+  font-size: 11px;
+  color: #8b98a5;
+}
+
+.setting-item input {
+  background: var(--secondary-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  padding: 6px;
+  border-radius: 4px;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+button {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+#startBtn {
+  background-color: var(--success-color);
+  color: white;
+}
+
+#stopBtn {
+  background-color: var(--error-color);
+  color: white;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--border-color);
+}
+
+.status-section,
+.logs-section {
+  background: var(--secondary-bg);
+  padding: 10px;
+  border-radius: 8px;
+}
+
+#status {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+#progress {
+  font-size: 11px;
+  color: #8b98a5;
+}
+
+#logs {
+  height: 150px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 11px;
+  color: #8b98a5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.log-entry {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 2px;
+}
+
+.log-time {
+  color: var(--primary-color);
+  margin-right: 4px;
+}
+
+.small-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  padding: 2px 6px;
+  font-size: 10px;
+  border-radius: 4px;
+  color: #8b98a5;
+  width: auto;
+  flex: none;
+}
