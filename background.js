@@ -10,15 +10,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'STOP_POSTING') {
         stopPosting();
     } else if (request.action === 'CONTENT_SCRIPT_READY') {
-        if (sender.tab.id === activeTabId) {
+        // If we are waiting for a tab, and this is it (or we just started), proceed
+        // We add a small retry if activeTabId is not set yet (race condition)
+        if (!activeTabId) {
+            setTimeout(() => {
+                if (activeTabId && sender.tab.id === activeTabId) {
+                    handleContentScriptReady(sender.tab.id);
+                }
+            }, 500);
+        } else if (sender.tab.id === activeTabId) {
             handleContentScriptReady(sender.tab.id);
         }
     } else if (request.action === 'POST_SUCCESS') {
-        if (sender.tab.id === activeTabId) {
+        // Allow success from the active tab
+        if (activeTabId && sender.tab.id === activeTabId) {
             handlePostSuccess();
         }
     } else if (request.action === 'POST_ERROR') {
-        if (sender.tab.id === activeTabId) {
+        if (activeTabId && sender.tab.id === activeTabId) {
             handlePostError(request.message);
         }
     }
@@ -44,7 +53,10 @@ function stopPosting() {
 
 function processNextTweet() {
     chrome.storage.local.get(['tweets', 'imageTweets', 'mode', 'currentIndex', 'isRunning'], (result) => {
-        if (!result.isRunning) return;
+        if (!result.isRunning) {
+            console.log('processNextTweet: isRunning is false, aborting.');
+            return;
+        }
 
         const mode = result.mode || 'text';
         const index = result.currentIndex || 0;
@@ -56,8 +68,16 @@ function processNextTweet() {
             items = result.tweets || [];
         }
 
+        console.log(`Processing next tweet. Mode: ${mode}, Index: ${index}, Total Items: ${items.length}`);
+
+        if (items.length === 0) {
+            log('Error: No tweets found in queue. Stopping.');
+            stopPosting();
+            return;
+        }
+
         if (index >= items.length) {
-            log('All items posted!');
+            log('All items posted! Stopping.');
             stopPosting();
             return;
         }
@@ -69,6 +89,7 @@ function processNextTweet() {
         // Open X.com compose page
         chrome.tabs.create({ url: 'https://x.com/compose/tweet' }, (tab) => {
             activeTabId = tab.id;
+            console.log(`Opened tab ${tab.id} for posting.`);
             // We wait for CONTENT_SCRIPT_READY message
         });
     });
@@ -152,12 +173,12 @@ function handlePostError(msg) {
 
 function closeActiveTab() {
     if (activeTabId) {
+        const tabIdToClose = activeTabId;
+        activeTabId = null; // Clear global immediately so we don't track it anymore
+
         // Wait 30 seconds before closing the tab
         setTimeout(() => {
-            if (activeTabId) {
-                chrome.tabs.remove(activeTabId).catch(() => { });
-                activeTabId = null;
-            }
+            chrome.tabs.remove(tabIdToClose).catch(() => { });
         }, 30000);
     }
 }
@@ -172,6 +193,8 @@ function log(message) {
     chrome.storage.local.get(['logs'], (result) => {
         const logs = result.logs || [];
         logs.push({ timestamp: Date.now(), message });
+        // Limit logs to last 100 to prevent storage issues
+        if (logs.length > 100) logs.shift();
         chrome.storage.local.set({ logs });
     });
 }

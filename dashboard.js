@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const csvInput = document.getElementById('csvInput');
+  const csvInput = document.getElementById('csvFile');
   const fileName = document.getElementById('fileName');
+  const manualTweetsList = document.getElementById('manualTweetsList');
+  const addMoreTweetsBtn = document.getElementById('addMoreTweetsBtn');
   const imageInput = document.getElementById('imageInput');
   const imageCount = document.getElementById('imageCount');
   const imageList = document.getElementById('imageList');
@@ -14,9 +16,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const clearLogsBtn = document.getElementById('clearLogs');
   const tabs = document.querySelectorAll('.tab-btn');
   const tabContents = document.querySelectorAll('.tab-content');
+  const progressCount = document.getElementById('progressCount');
+  const progressBar = document.getElementById('progressBar');
 
   let currentMode = 'text'; // 'text' or 'images'
   let selectedImages = []; // Array of { file, caption }
+  let csvTweets = []; // Store CSV tweets locally
 
   // Load saved state
   chrome.storage.local.get(['isRunning', 'tweets', 'imageTweets', 'mode', 'currentIndex', 'logs', 'minDelay', 'maxDelay'], (result) => {
@@ -44,15 +49,41 @@ document.addEventListener('DOMContentLoaded', () => {
       fileName.textContent = `Loaded ${result.tweets.length} tweets`;
     }
 
-    // We don't easily restore selected images UI from storage because of size, 
-    // but if the user reloads the page while running, we might want to show status.
-    // For now, we just show status.
-
     if (result.logs) {
       renderLogs(result.logs);
     }
 
     updateStatus(result);
+  });
+
+  // Initialize manual tweets
+  function addManualTweetInputs(count = 5) {
+    for (let i = 0; i < count; i++) {
+      const textarea = document.createElement('textarea');
+      textarea.className = 'manual-tweet-input image-caption'; // Reuse styling
+      textarea.style.width = '100%';
+      textarea.style.marginBottom = '10px';
+      textarea.placeholder = 'Enter tweet text...';
+
+      // Enable start button on input
+      textarea.addEventListener('input', checkStartButtonState);
+
+      manualTweetsList.appendChild(textarea);
+    }
+  }
+
+  function checkStartButtonState() {
+    if (currentMode === 'text') {
+      const manualInputs = document.querySelectorAll('.manual-tweet-input');
+      const hasManualText = Array.from(manualInputs).some(input => input.value.trim().length > 0);
+      startBtn.disabled = !(csvTweets.length > 0 || hasManualText);
+    }
+  }
+
+  addManualTweetInputs(5); // Add initial 5
+
+  addMoreTweetsBtn.addEventListener('click', () => {
+    addManualTweetInputs(5);
   });
 
   // Tab Switching
@@ -73,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (result.isRunning) return; // Don't change buttons if running
 
       if (mode === 'text') {
-        startBtn.disabled = !(result.tweets && result.tweets.length > 0);
+        checkStartButtonState();
       } else {
         // For images, we check our local variable first, then storage
         startBtn.disabled = selectedImages.length === 0 && !(result.imageTweets && result.imageTweets.length > 0);
@@ -89,20 +120,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target.result;
-        const tweets = parseCSV(text);
-        if (tweets.length > 0) {
-          chrome.storage.local.set({
-            tweets: tweets,
-            mode: 'text',
-            currentIndex: 0,
-            logs: []
-          }, () => {
-            log('Loaded ' + tweets.length + ' text tweets from ' + file.name);
-            if (currentMode === 'text') startBtn.disabled = false;
-          });
-        } else {
-          alert('No valid tweets found in CSV');
-        }
+        csvTweets = parseCSV(text); // Store in local var
+        log('Loaded ' + csvTweets.length + ' text tweets from ' + file.name);
+        checkStartButtonState();
       };
       reader.readAsText(file);
     }
@@ -222,7 +242,27 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } else {
       // Text mode
-      chrome.storage.local.set({ mode: 'text' }, () => {
+      // Collect manual tweets
+      const manualInputs = document.querySelectorAll('.manual-tweet-input');
+      const manualTweets = Array.from(manualInputs)
+        .map(input => input.value.trim())
+        .filter(text => text.length > 0);
+
+      const allTweets = [...csvTweets, ...manualTweets];
+
+      if (allTweets.length === 0) {
+        alert('No tweets to post! Upload a CSV or enter text manually.');
+        return;
+      }
+
+      console.log('Starting text posting with tweets:', allTweets);
+
+      chrome.storage.local.set({
+        tweets: allTweets,
+        mode: 'text',
+        currentIndex: 0,
+        logs: []
+      }, () => {
         startPosting(minDelay, maxDelay);
       });
     }
@@ -257,6 +297,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     }
+    // Check if we can start
+    chrome.storage.local.get(['tweets', 'imageTweets', 'isRunning'], (result) => {
+      if (result.isRunning) return; // Don't change buttons if running
+
+      // Use the UI's current mode, not the stored mode (which might be old)
+      if (currentMode === 'text') {
+        checkStartButtonState();
+      } else {
+        // For images, we check our local variable first, then storage
+        startBtn.disabled = selectedImages.length === 0 && !(result.imageTweets && result.imageTweets.length > 0);
+      }
+    });
   });
 
   function parseCSV(text) {
@@ -292,7 +344,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const current = state.currentIndex !== undefined ? state.currentIndex : 0;
-    progressDiv.textContent = `${state.mode === 'images' ? 'Images' : 'Tweets'}: ${current}/${total}`;
+    const displayCurrent = Math.min(current, total); // Don't show more than total
+
+    // Update text
+    progressDiv.textContent = `${state.mode === 'images' ? 'Images' : 'Tweets'}: ${displayCurrent}/${total}`;
+    progressCount.textContent = `${displayCurrent}/${total}`;
+
+    // Update bar
+    const percent = total > 0 ? (displayCurrent / total) * 100 : 0;
+    progressBar.style.width = `${percent}%`;
   }
 
   function renderLogs(logs) {

@@ -205,7 +205,8 @@ button:disabled {
 }
 
 .status-section,
-.logs-section {
+.logs-section,
+.progress-section {
   background: var(--secondary-bg);
   padding: 10px;
   border-radius: 8px;
@@ -219,6 +220,29 @@ button:disabled {
 #progress {
   font-size: 11px;
   color: #8b98a5;
+}
+
+/* Progress Bar */
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #8b98a5;
+  margin-bottom: 6px;
+}
+
+.progress-track {
+  background: var(--bg-color);
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  background: var(--primary-color);
+  height: 100%;
+  width: 0%;
+  transition: width 0.3s ease;
 }
 
 #logs {

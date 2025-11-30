@@ -19,12 +19,18 @@
 
     <div id="textTab" class="tab-content active">
       <div class="control-group">
-        <label for="csvInput" class="file-upload">
+        <label class="file-upload">
           Upload CSV
-          <input type="file" id="csvInput" accept=".csv">
+          <input type="file" id="csvFile" accept=".csv">
         </label>
         <span id="fileName">No file chosen</span>
       </div>
+
+      <div id="manualTweetsList" class="manual-tweets-list">
+        <!-- Text inputs will be added here -->
+      </div>
+      <button id="addMoreTweetsBtn" class="secondary-btn" style="margin-top: 10px; width: 100%;">+ Add 5 More Tweet
+        Boxes</button>
     </div>
 
     <div id="imagesTab" class="tab-content">
@@ -58,6 +64,16 @@
       <h3>Status</h3>
       <div id="status">Idle</div>
       <div id="progress">Tweets: 0/0</div>
+    </div>
+
+    <div class="progress-section">
+      <div class="progress-info">
+        <span>Progress</span>
+        <span id="progressCount">0/0</span>
+      </div>
+      <div class="progress-track">
+        <div id="progressBar" class="progress-fill"></div>
+      </div>
     </div>
 
     <div class="logs-section">

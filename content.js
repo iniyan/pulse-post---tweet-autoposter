@@ -26,17 +26,41 @@ async function attemptPost(text) {
         if (!textarea) throw new Error('Could not find tweet textarea');
 
         textarea.focus();
+        await new Promise(r => setTimeout(r, 100));
 
         // Clear and insert
         document.execCommand('selectAll', false, null);
         document.execCommand('delete', false, null);
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 200));
 
-        document.execCommand('insertText', false, text);
+        console.log('Inserting text via DataTransfer...');
+        const dt = new DataTransfer();
+        dt.setData('text/plain', text + ' '); // Add trailing space here
 
-        // Force React state update by adding a space
-        await new Promise(r => setTimeout(r, 500));
-        document.execCommand('insertText', false, ' ');
+        const pasteEvent = new ClipboardEvent('paste', {
+            bubbles: true,
+            cancelable: true,
+            clipboardData: dt
+        });
+
+        textarea.dispatchEvent(pasteEvent);
+
+        // Fallback if paste failed
+        await new Promise(r => setTimeout(r, 200));
+        if (!textarea.innerText.includes(text)) {
+            console.log('Paste failed, trying execCommand fallback...');
+            document.execCommand('insertText', false, text + ' ');
+        }
+
+        // Verify content
+        if (textarea.innerText.includes(text)) {
+            console.log('Verification: Text appears to be in textarea.');
+        } else {
+            console.warn('Verification Failed: Text NOT found in textarea!');
+        }
+
+        console.log('Waiting for React state update...');
+        await new Promise(r => setTimeout(r, 2000));
 
         await clickPostButton();
 
