@@ -19,9 +19,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const progressCount = document.getElementById('progressCount');
   const progressBar = document.getElementById('progressBar');
 
-  let currentMode = 'text'; // 'text' or 'images'
+  // AI Elements
+  const aiPrompt = document.getElementById('aiPrompt');
+  const aiTweetCount = document.getElementById('aiTweetCount');
+  const generateAiBtn = document.getElementById('generateAiBtn');
+  const aiResults = document.getElementById('aiResults');
+  const approveAiBtn = document.getElementById('approveAiBtn');
+
+  // Report Elements
+  const reportTable = document.getElementById('reportTable').querySelector('tbody');
+
+  let currentMode = 'text'; // 'text', 'images', 'ai', 'reports'
   let selectedImages = []; // Array of { file, caption }
-  let csvTweets = []; // Store CSV tweets locally
+  let textTweets = []; // Store text tweets locally (objects: { content, type })
 
   // Load saved state
   chrome.storage.local.get(['isRunning', 'tweets', 'imageTweets', 'mode', 'currentIndex', 'logs', 'minDelay', 'maxDelay'], (result) => {
@@ -30,7 +40,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Restore mode
     if (result.mode) {
-      switchTab(result.mode);
+      // If mode was 'ai' or 'reports', we might default to 'text' or handle it.
+      // For now, let's respect it if it's a valid tab, otherwise default to text.
+      if (['text', 'images', 'ai', 'reports'].includes(result.mode)) {
+        switchTab(result.mode);
+      } else {
+        switchTab('text');
+      }
     }
 
     // Restore running state
@@ -46,7 +62,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (result.tweets && result.tweets.length > 0) {
-      fileName.textContent = `Loaded ${result.tweets.length} tweets`;
+      // Check if tweets are objects or strings (migration)
+      textTweets = result.tweets.map(t => typeof t === 'string' ? { content: t, type: 'text' } : t);
+      updateCsvUI();
     }
 
     if (result.logs) {
@@ -60,8 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function addManualTweetInputs(count = 5) {
     for (let i = 0; i < count; i++) {
       const textarea = document.createElement('textarea');
-      textarea.className = 'manual-tweet-input image-caption'; // Reuse styling
-      textarea.style.width = '100%';
+      textarea.className = 'manual-tweet-input';
       textarea.style.marginBottom = '10px';
       textarea.placeholder = 'Enter tweet text...';
 
@@ -76,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (currentMode === 'text') {
       const manualInputs = document.querySelectorAll('.manual-tweet-input');
       const hasManualText = Array.from(manualInputs).some(input => input.value.trim().length > 0);
-      startBtn.disabled = !(csvTweets.length > 0 || hasManualText);
+      startBtn.disabled = !(textTweets.length > 0 || hasManualText);
     }
   }
 
@@ -99,20 +116,46 @@ document.addEventListener('DOMContentLoaded', () => {
     tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === mode));
     tabContents.forEach(c => c.classList.toggle('active', c.id === `${mode}Tab`));
 
+    // Toggle automation controls visibility
+    const automationControls = document.getElementById('automationControls');
+    if (mode === 'reports') {
+      automationControls.style.display = 'none';
+      loadReports();
+    } else {
+      automationControls.style.display = 'block';
+    }
+
     // Check if we can start
     chrome.storage.local.get(['tweets', 'imageTweets', 'isRunning'], (result) => {
       if (result.isRunning) return; // Don't change buttons if running
 
       if (mode === 'text') {
         checkStartButtonState();
-      } else {
-        // For images, we check our local variable first, then storage
+      } else if (mode === 'images') {
         startBtn.disabled = selectedImages.length === 0 && !(result.imageTweets && result.imageTweets.length > 0);
       }
+      // AI tab doesn't directly enable start button until tweets are approved
     });
   }
 
   // Text CSV Handling
+  const clearCsvBtn = document.getElementById('clearCsvBtn');
+
+  function updateCsvUI() {
+    const hasTextTweets = textTweets.some(t => t.type === 'text');
+    if (hasTextTweets) {
+      clearCsvBtn.style.display = 'block';
+      if (fileName.textContent === 'No file chosen') {
+        fileName.textContent = `Loaded ${textTweets.filter(t => t.type === 'text').length} tweets`;
+      }
+    } else {
+      clearCsvBtn.style.display = 'none';
+      fileName.textContent = 'No file chosen';
+      csvInput.value = '';
+    }
+    checkStartButtonState();
+  }
+
   csvInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -120,12 +163,29 @@ document.addEventListener('DOMContentLoaded', () => {
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target.result;
-        csvTweets = parseCSV(text); // Store in local var
-        log('Loaded ' + csvTweets.length + ' text tweets from ' + file.name);
-        checkStartButtonState();
+        const parsed = parseCSV(text);
+        // Filter out existing CSV tweets (type 'text') to replace them, but keep AI tweets
+        const aiTweets = textTweets.filter(t => t.type === 'ai');
+        const newCsvTweets = parsed.map(t => ({ content: t, type: 'text' }));
+
+        textTweets = [...aiTweets, ...newCsvTweets];
+
+        log('Loaded ' + newCsvTweets.length + ' text tweets from ' + file.name);
+        updateCsvUI();
+        // Update storage
+        chrome.storage.local.set({ tweets: textTweets });
       };
       reader.readAsText(file);
     }
+  });
+
+  clearCsvBtn.addEventListener('click', () => {
+    // Remove only CSV tweets (type 'text')
+    textTweets = textTweets.filter(t => t.type === 'ai');
+    updateCsvUI();
+    // Update storage
+    chrome.storage.local.set({ tweets: textTweets });
+    log('Removed CSV tweets.');
   });
 
   // Image Handling
@@ -161,6 +221,9 @@ document.addEventListener('DOMContentLoaded', () => {
       img.className = 'image-preview';
       img.src = URL.createObjectURL(item.file);
 
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'image-content';
+
       const textarea = document.createElement('textarea');
       textarea.className = 'image-caption';
       textarea.placeholder = 'Enter caption...';
@@ -168,6 +231,59 @@ document.addEventListener('DOMContentLoaded', () => {
       textarea.addEventListener('input', (e) => {
         item.caption = e.target.value;
       });
+
+      // Schedule Controls
+      const scheduleDiv = document.createElement('div');
+      scheduleDiv.className = 'schedule-container';
+
+      const scheduleBtn = document.createElement('button');
+      scheduleBtn.className = `schedule-btn ${item.scheduledTime ? 'active' : ''}`;
+      scheduleBtn.innerHTML = item.scheduledTime
+        ? `📅 ${new Date(item.scheduledTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+        : '📅 Schedule';
+
+      const dateInput = document.createElement('input');
+      dateInput.type = 'datetime-local';
+      dateInput.className = `schedule-input ${item.scheduledTime ? 'visible' : ''}`;
+      if (item.scheduledTime) {
+        dateInput.value = item.scheduledTime;
+      }
+
+      scheduleBtn.onclick = () => {
+        if (dateInput.classList.contains('visible')) {
+          // If visible, hide it. If no value, clear active state
+          dateInput.classList.remove('visible');
+          if (!dateInput.value) {
+            item.scheduledTime = null;
+            scheduleBtn.classList.remove('active');
+            scheduleBtn.innerHTML = '📅 Schedule';
+          }
+        } else {
+          // Show it
+          dateInput.classList.add('visible');
+          dateInput.focus();
+        }
+      };
+
+      dateInput.addEventListener('change', (e) => {
+        item.scheduledTime = e.target.value;
+        if (item.scheduledTime) {
+          scheduleBtn.classList.add('active');
+          scheduleBtn.innerHTML = `📅 ${new Date(item.scheduledTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+          dateInput.classList.remove('visible'); // Hide after selection
+        } else {
+          scheduleBtn.classList.remove('active');
+          scheduleBtn.innerHTML = '📅 Schedule';
+        }
+      });
+
+      // Close input if clicking outside (optional polish, but let's keep it simple for now)
+
+      scheduleDiv.appendChild(scheduleBtn);
+      scheduleDiv.appendChild(dateInput);
+
+      contentDiv.appendChild(textarea);
+      contentDiv.appendChild(scheduleDiv);
 
       const removeBtn = document.createElement('button');
       removeBtn.className = 'remove-image';
@@ -179,7 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       div.appendChild(img);
-      div.appendChild(textarea);
+      div.appendChild(contentDiv);
       div.appendChild(removeBtn);
       imageList.appendChild(div);
     });
@@ -187,6 +303,153 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateImageCount() {
     imageCount.textContent = `${selectedImages.length} images selected`;
+  }
+
+  // AI Generation
+  generateAiBtn.addEventListener('click', async () => {
+    const prompt = aiPrompt.value.trim();
+    const count = parseInt(aiTweetCount.value, 10);
+
+    if (!prompt) {
+      alert('Please enter a prompt.');
+      return;
+    }
+
+    generateAiBtn.disabled = true;
+    generateAiBtn.textContent = 'Generating...';
+    aiResults.innerHTML = '';
+    approveAiBtn.style.display = 'none';
+
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer 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',
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://pulsepost.extension', // Optional
+          'X-Title': 'PulsePost' // Optional
+        },
+        body: JSON.stringify({
+          "model": "x-ai/grok-4.1-fast:free",
+          "messages": [
+            {
+              "role": "system",
+              "content": `You are a helpful social media assistant. Generate exactly ${count} tweets based on the user's prompt. Return ONLY the tweets, one per line. Do not number them. Do not include hashtags unless asked. Keep them under 280 characters.`
+            },
+            {
+              "role": "user",
+              "content": prompt
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+      const tweets = content.split('\n').filter(line => line.trim().length > 0);
+
+      renderAiResults(tweets);
+      approveAiBtn.style.display = 'block';
+
+    } catch (error) {
+      console.error(error);
+      alert('Failed to generate tweets: ' + error.message);
+    } finally {
+      generateAiBtn.disabled = false;
+      generateAiBtn.textContent = 'Generate Tweets';
+    }
+  });
+
+  function renderAiResults(tweets) {
+    aiResults.innerHTML = '';
+    tweets.forEach((text, index) => {
+      const div = document.createElement('div');
+      div.className = 'ai-tweet-item';
+
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+
+      const actions = document.createElement('div');
+      actions.className = 'ai-tweet-actions';
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'small-btn';
+      removeBtn.textContent = 'Remove';
+      removeBtn.style.color = 'var(--error-color)';
+      removeBtn.onclick = () => div.remove();
+
+      actions.appendChild(removeBtn);
+      div.appendChild(textarea);
+      div.appendChild(actions);
+      aiResults.appendChild(div);
+    });
+  }
+
+  approveAiBtn.addEventListener('click', () => {
+    const textareas = aiResults.querySelectorAll('textarea');
+    const newTweets = Array.from(textareas).map(t => ({
+      content: t.value.trim(),
+      type: 'ai'
+    })).filter(t => t.content.length > 0);
+
+    if (newTweets.length === 0) {
+      alert('No tweets to approve.');
+      return;
+    }
+
+    // Add to textTweets
+    textTweets = [...textTweets, ...newTweets];
+
+    // Clear AI results
+    aiResults.innerHTML = '';
+    approveAiBtn.style.display = 'none';
+    aiPrompt.value = '';
+
+    // Switch to text tab to show they are ready (conceptually, though we don't list them all in UI)
+    // Or just notify
+    alert(`Approved ${newTweets.length} AI tweets! They have been added to the queue.`);
+    log(`Approved ${newTweets.length} AI tweets.`);
+
+    // Update storage immediately so they are saved
+    chrome.storage.local.set({ tweets: textTweets });
+
+    // Enable start button if we are in text mode
+    checkStartButtonState();
+  });
+
+  // Reports
+  function loadReports() {
+    chrome.storage.local.get(['dailyStats'], (result) => {
+      const stats = result.dailyStats || {};
+      reportTable.innerHTML = '';
+
+      // Sort dates descending
+      const dates = Object.keys(stats).sort().reverse();
+
+      if (dates.length === 0) {
+        reportTable.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-secondary);">No activity yet.</td></tr>';
+        return;
+      }
+
+      dates.forEach(date => {
+        const dayStats = stats[date];
+        const total = (dayStats.text || 0) + (dayStats.image || 0) + (dayStats.ai || 0);
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${date}</td>
+          <td>${dayStats.text || 0}</td>
+          <td>${dayStats.image || 0}</td>
+          <td>${dayStats.ai || 0}</td>
+          <td><strong>${total}</strong></td>
+        `;
+        reportTable.appendChild(row);
+      });
+    });
   }
 
   // Start/Stop
@@ -222,7 +485,8 @@ document.addEventListener('DOMContentLoaded', () => {
           return {
             data: base64,
             type: item.file.type,
-            caption: item.caption
+            caption: item.caption,
+            scheduledTime: item.scheduledTime // Pass scheduled time
           };
         }));
 
@@ -241,17 +505,18 @@ document.addEventListener('DOMContentLoaded', () => {
         startBtn.textContent = 'Start Posting';
       }
     } else {
-      // Text mode
+      // Text mode (includes AI tweets if they were added to textTweets)
       // Collect manual tweets
       const manualInputs = document.querySelectorAll('.manual-tweet-input');
       const manualTweets = Array.from(manualInputs)
         .map(input => input.value.trim())
-        .filter(text => text.length > 0);
+        .filter(text => text.length > 0)
+        .map(text => ({ content: text, type: 'text' }));
 
-      const allTweets = [...csvTweets, ...manualTweets];
+      const allTweets = [...textTweets, ...manualTweets];
 
       if (allTweets.length === 0) {
-        alert('No tweets to post! Upload a CSV or enter text manually.');
+        alert('No tweets to post! Upload a CSV, generate AI tweets, or enter text manually.');
         return;
       }
 
@@ -286,7 +551,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
-      chrome.storage.local.get(['isRunning', 'tweets', 'imageTweets', 'currentIndex', 'logs', 'mode'], (result) => {
+      chrome.storage.local.get(['isRunning', 'tweets', 'imageTweets', 'currentIndex', 'logs', 'mode', 'dailyStats'], (result) => {
         updateStatus(result);
         if (changes.logs) {
           renderLogs(result.logs);
@@ -295,17 +560,19 @@ document.addEventListener('DOMContentLoaded', () => {
           startBtn.disabled = result.isRunning;
           stopBtn.disabled = !result.isRunning;
         }
+        if (changes.dailyStats && currentMode === 'reports') {
+          loadReports();
+        }
       });
     }
     // Check if we can start
     chrome.storage.local.get(['tweets', 'imageTweets', 'isRunning'], (result) => {
       if (result.isRunning) return; // Don't change buttons if running
 
-      // Use the UI's current mode, not the stored mode (which might be old)
+      // Use the UI's current mode
       if (currentMode === 'text') {
         checkStartButtonState();
-      } else {
-        // For images, we check our local variable first, then storage
+      } else if (currentMode === 'images') {
         startBtn.disabled = selectedImages.length === 0 && !(result.imageTweets && result.imageTweets.length > 0);
       }
     });
@@ -333,7 +600,7 @@ document.addEventListener('DOMContentLoaded', () => {
       statusDiv.style.color = 'var(--success-color)';
     } else {
       statusDiv.textContent = 'Idle';
-      statusDiv.style.color = '#8b98a5';
+      statusDiv.style.color = 'var(--text-secondary)';
     }
 
     let total = 0;

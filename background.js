@@ -83,7 +83,28 @@ function processNextTweet() {
         }
 
         const item = items[index];
-        const desc = mode === 'images' ? `Image ${index + 1}` : `"${item.substring(0, 20)}..."`;
+
+        // Check for scheduled time
+        if (mode === 'images' && item.scheduledTime) {
+            const targetTime = new Date(item.scheduledTime).getTime();
+            const now = Date.now();
+            const delayMs = targetTime - now;
+
+            if (delayMs > 0) {
+                const delayMinutes = Math.max(0.1, delayMs / 60000); // Min 0.1 min
+                log(`Scheduled post. Waiting until ${new Date(targetTime).toLocaleTimeString()}...`);
+                chrome.alarms.create('nextPost', { delayInMinutes: delayMinutes });
+                return;
+            }
+        }
+
+        let desc = '';
+        if (mode === 'images') {
+            desc = `Image ${index + 1}`;
+        } else {
+            const text = typeof item === 'object' ? item.content : item;
+            desc = `"${text.substring(0, 20)}..."`;
+        }
         log(`Preparing to post ${desc} (${index + 1}/${items.length})`);
 
         // Open X.com compose page
@@ -117,9 +138,10 @@ function handleContentScriptReady(tabId) {
             const items = result.tweets || [];
             const item = items[index];
             if (item) {
+                const text = typeof item === 'object' ? item.content : item;
                 payload = {
                     action: 'DO_POST',
-                    text: item
+                    text: text
                 };
             }
         }
@@ -140,17 +162,51 @@ function handlePostSuccess() {
     log('Posted successfully.');
     closeActiveTab();
 
-    chrome.storage.local.get(['currentIndex', 'minDelay', 'maxDelay'], (result) => {
-        const nextIndex = (result.currentIndex || 0) + 1;
-        chrome.storage.local.set({ currentIndex: nextIndex }, () => {
+    chrome.storage.local.get(['tweets', 'imageTweets', 'mode', 'currentIndex', 'minDelay', 'maxDelay', 'dailyStats'], (result) => {
+        // Update Stats
+        const mode = result.mode || 'text';
+        const index = result.currentIndex || 0;
+        let type = 'text';
+
+        if (mode === 'images') {
+            type = 'image';
+        } else {
+            const items = result.tweets || [];
+            const item = items[index];
+            if (typeof item === 'object' && item.type) {
+                type = item.type;
+            }
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        const stats = result.dailyStats || {};
+        if (!stats[today]) stats[today] = { text: 0, image: 0, ai: 0 };
+
+        if (type === 'ai') stats[today].ai++;
+        else if (type === 'image') stats[today].image++;
+        else stats[today].text++;
+
+        const nextIndex = index + 1;
+
+        chrome.storage.local.set({
+            currentIndex: nextIndex,
+            dailyStats: stats
+        }, () => {
+            // Check if next item is scheduled
+            let nextDelay = 0;
+
+            // Default random delay
             const min = result.minDelay || 29;
             const max = result.maxDelay || 70;
-            const delay = Math.floor(Math.random() * (max - min + 1) + min);
+            nextDelay = Math.floor(Math.random() * (max - min + 1) + min);
 
-            log(`Waiting ${delay} seconds before next post...`);
+            // If next item is scheduled, processNextTweet will handle the wait
+            // But we still need to trigger it.
+            // If we trigger it immediately, processNextTweet will check the schedule.
+            // However, we usually want at least the min delay between actions to be safe.
 
-            // Use alarms for the delay
-            chrome.alarms.create('nextPost', { delayInMinutes: delay / 60 });
+            log(`Waiting ${nextDelay} seconds before next check...`);
+            chrome.alarms.create('nextPost', { delayInMinutes: nextDelay / 60 });
         });
     });
 }
