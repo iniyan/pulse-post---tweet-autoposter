@@ -305,10 +305,37 @@ document.addEventListener('DOMContentLoaded', () => {
     imageCount.textContent = `${selectedImages.length} images selected`;
   }
 
+  // AI Elements
+  const apiKeyInput = document.getElementById('apiKey');
+  // Variables aiPrompt, aiTweetCount, etc. are already declared at the top of the file.
+  // We just need to access apiKeyInput here.
+
+  // ... (existing code)
+
+  // Load saved state
+  chrome.storage.local.get(['isRunning', 'tweets', 'imageTweets', 'mode', 'currentIndex', 'logs', 'minDelay', 'maxDelay', 'apiKey'], (result) => {
+    if (result.minDelay) minDelayInput.value = result.minDelay;
+    if (result.maxDelay) maxDelayInput.value = result.maxDelay;
+    if (result.apiKey) apiKeyInput.value = result.apiKey;
+
+    // ... (rest of load logic)
+  });
+
+  // Save API Key on change
+  apiKeyInput.addEventListener('change', () => {
+    chrome.storage.local.set({ apiKey: apiKeyInput.value.trim() });
+  });
+
   // AI Generation
   generateAiBtn.addEventListener('click', async () => {
     const prompt = aiPrompt.value.trim();
     const count = parseInt(aiTweetCount.value, 10);
+    const apiKey = apiKeyInput.value.trim();
+
+    if (!apiKey) {
+      alert('Please enter your OpenRouter API Key.');
+      return;
+    }
 
     if (!prompt) {
       alert('Please enter a prompt.');
@@ -320,11 +347,14 @@ document.addEventListener('DOMContentLoaded', () => {
     aiResults.innerHTML = '';
     approveAiBtn.style.display = 'none';
 
+    // Save key just in case
+    chrome.storage.local.set({ apiKey });
+
     try {
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer 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',
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://pulsepost.extension', // Optional
           'X-Title': 'PulsePost' // Optional
@@ -345,10 +375,17 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Unauthorized: Invalid API Key. Please check your key.');
+        }
         throw new Error(`API Error: ${response.status}`);
       }
 
       const data = await response.json();
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error('Invalid response format from API');
+      }
+
       const content = data.choices[0].message.content;
       const tweets = content.split('\n').filter(line => line.trim().length > 0);
 
@@ -642,12 +679,320 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = error => reject(error);
+  // Clear All Queues
+  const clearAllBtn = document.getElementById('clearAllBtn');
+  clearAllBtn.addEventListener('click', () => {
+    if (confirm('Are you sure you want to clear ALL queues (Text, Images, AI)? This cannot be undone.')) {
+      // Clear local state
+      textTweets = [];
+      selectedImages = [];
+
+      // Clear UI
+      manualTweetsList.innerHTML = '';
+      addManualTweetInputs(5);
+      imageList.innerHTML = '';
+      imageCount.textContent = '0 images selected';
+      fileName.textContent = 'No file chosen';
+      csvInput.value = '';
+      updateCsvUI(); // Hides the clear CSV button
+
+      // Clear storage
+      chrome.storage.local.set({
+        tweets: [],
+        imageTweets: [],
+        currentIndex: 0,
+        logs: []
+      }, () => {
+        log('All queues cleared.');
+        checkStartButtonState();
+        startBtn.disabled = true;
+      });
+    }
+  });
+
+  // Helper: Create Action Buttons (Emoji & Hashtag)
+  function createInputActions(textarea, type = 'text') {
+    const container = document.createElement('div');
+    container.className = 'input-actions';
+
+    // Emoji Button
+    const emojiBtn = document.createElement('button');
+    emojiBtn.className = 'action-icon-btn emoji-trigger';
+    emojiBtn.innerHTML = '😊';
+    emojiBtn.title = 'Add Emoji';
+    emojiBtn.onclick = (e) => {
+      e.stopPropagation();
+      toggleEmojiPicker(e, textarea);
+    };
+
+    // Hashtag Button
+    const hashtagBtn = document.createElement('button');
+    hashtagBtn.className = 'action-icon-btn hashtag-btn';
+    hashtagBtn.innerHTML = '✨'; // Sparkles
+    hashtagBtn.title = 'Generate Hashtags';
+    hashtagBtn.onclick = async () => {
+      const text = textarea.value.trim();
+      if (!text) {
+        alert('Please enter some text first.');
+        return;
+      }
+
+      const apiKey = apiKeyInput.value.trim();
+      if (!apiKey) {
+        alert('Please enter your OpenRouter API Key in the AI Tweets tab first.');
+        switchTab('ai');
+        return;
+      }
+
+      hashtagBtn.innerHTML = '<span class="loading-spinner">↻</span>';
+      hashtagBtn.disabled = true;
+
+      try {
+        const tags = await generateHashtags(text, apiKey);
+        if (tags) {
+          textarea.value += ' ' + tags;
+          textarea.dispatchEvent(new Event('input')); // Trigger updates
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Failed to generate hashtags: ' + err.message);
+      } finally {
+        hashtagBtn.innerHTML = '✨';
+        hashtagBtn.disabled = false;
+      }
+    };
+
+    container.appendChild(emojiBtn);
+    container.appendChild(hashtagBtn);
+    return container;
+  }
+
+  // Emoji Picker Logic
+  const emojis = ['😀', '😂', '🥰', '😍', '😎', '😭', '😡', '👍', '👎', '🔥', '✨', '❤️', '💯', '🚀', '👀', '🤔', '🎉', '🙏', '🙌', '💀', '🤡', '💩', '👻', '🤖'];
+  let activePicker = null;
+
+  function toggleEmojiPicker(event, textarea) {
+    if (activePicker) {
+      activePicker.remove();
+      activePicker = null;
+      return;
+    }
+
+    const picker = document.createElement('div');
+    picker.className = 'emoji-picker';
+
+    emojis.forEach(emoji => {
+      const btn = document.createElement('button');
+      btn.className = 'emoji-btn';
+      btn.textContent = emoji;
+      btn.onclick = () => {
+        insertAtCursor(textarea, emoji);
+        picker.remove();
+        activePicker = null;
+      };
+      picker.appendChild(btn);
+    });
+
+    // Position logic
+    const rect = event.target.getBoundingClientRect();
+    picker.style.top = `${rect.bottom + window.scrollY + 5}px`;
+    picker.style.left = `${rect.left + window.scrollX}px`;
+
+    document.body.appendChild(picker);
+    activePicker = picker;
+
+    // Close on click outside
+    setTimeout(() => {
+      document.addEventListener('click', closePickerOutside);
+    }, 0);
+  }
+
+  function closePickerOutside(e) {
+    if (activePicker && !activePicker.contains(e.target) && !e.target.classList.contains('emoji-trigger')) {
+      activePicker.remove();
+      activePicker = null;
+      document.removeEventListener('click', closePickerOutside);
+    }
+  }
+
+  function insertAtCursor(textarea, text) {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const value = textarea.value;
+    textarea.value = value.substring(0, start) + text + value.substring(end);
+    textarea.selectionStart = textarea.selectionEnd = start + text.length;
+    textarea.focus();
+    textarea.dispatchEvent(new Event('input'));
+  }
+
+  async function generateHashtags(text, apiKey) {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://pulsepost.extension',
+        'X-Title': 'PulsePost'
+      },
+      body: JSON.stringify({
+        "model": "x-ai/grok-4.1-fast:free",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are a social media expert. Generate 3-5 relevant, trending hashtags for the given tweet text. Return ONLY the hashtags separated by spaces. No other text."
+          },
+          {
+            "role": "user",
+            "content": text
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) throw new Error('API Error');
+    const data = await response.json();
+    return data.choices[0].message.content.trim();
+  }
+
+  // Update Manual Inputs to include actions
+  function addManualTweetInputs(count = 5) {
+    for (let i = 0; i < count; i++) {
+      const wrapper = document.createElement('div');
+      wrapper.style.marginBottom = '15px';
+
+      const textarea = document.createElement('textarea');
+      textarea.className = 'manual-tweet-input';
+      textarea.style.marginBottom = '5px'; // Reduced margin for actions
+      textarea.placeholder = 'Enter tweet text...';
+      textarea.addEventListener('input', checkStartButtonState);
+
+      const actions = createInputActions(textarea);
+
+      wrapper.appendChild(textarea);
+      wrapper.appendChild(actions);
+      manualTweetsList.appendChild(wrapper);
+    }
+  }
+
+  // Update Image List to include actions
+  function renderImageList() {
+    imageList.innerHTML = '';
+    selectedImages.forEach((item, index) => {
+      const div = document.createElement('div');
+      div.className = 'image-item';
+
+      const img = document.createElement('img');
+      img.className = 'image-preview';
+      img.src = URL.createObjectURL(item.file);
+
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'image-content';
+
+      const textarea = document.createElement('textarea');
+      textarea.className = 'image-caption';
+      textarea.placeholder = 'Enter caption...';
+      textarea.value = item.caption;
+      textarea.addEventListener('input', (e) => {
+        item.caption = e.target.value;
+      });
+
+      // Actions (Emoji/Hashtag)
+      const actionsDiv = createInputActions(textarea, 'image');
+
+      // Schedule Controls
+      const scheduleDiv = document.createElement('div');
+      scheduleDiv.className = 'schedule-container';
+
+      const scheduleBtn = document.createElement('button');
+      scheduleBtn.className = `schedule-btn ${item.scheduledTime ? 'active' : ''}`;
+      scheduleBtn.innerHTML = item.scheduledTime
+        ? `📅 ${new Date(item.scheduledTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+        : '📅 Schedule';
+
+      const dateInput = document.createElement('input');
+      dateInput.type = 'datetime-local';
+      dateInput.className = `schedule-input ${item.scheduledTime ? 'visible' : ''}`;
+      if (item.scheduledTime) {
+        dateInput.value = item.scheduledTime;
+      }
+
+      scheduleBtn.onclick = () => {
+        if (dateInput.classList.contains('visible')) {
+          dateInput.classList.remove('visible');
+          if (!dateInput.value) {
+            item.scheduledTime = null;
+            scheduleBtn.classList.remove('active');
+            scheduleBtn.innerHTML = '📅 Schedule';
+          }
+        } else {
+          dateInput.classList.add('visible');
+          dateInput.focus();
+        }
+      };
+
+      dateInput.addEventListener('change', (e) => {
+        item.scheduledTime = e.target.value;
+        if (item.scheduledTime) {
+          scheduleBtn.classList.add('active');
+          scheduleBtn.innerHTML = `📅 ${new Date(item.scheduledTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+          dateInput.classList.remove('visible');
+        } else {
+          scheduleBtn.classList.remove('active');
+          scheduleBtn.innerHTML = '📅 Schedule';
+        }
+      });
+
+      scheduleDiv.appendChild(scheduleBtn);
+      scheduleDiv.appendChild(dateInput);
+
+      contentDiv.appendChild(textarea);
+      contentDiv.appendChild(actionsDiv); // Add actions
+      contentDiv.appendChild(scheduleDiv);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'remove-image';
+      removeBtn.innerHTML = '&times;';
+      removeBtn.onclick = () => {
+        selectedImages.splice(index, 1);
+        renderImageList();
+        updateImageCount();
+      };
+
+      div.appendChild(img);
+      div.appendChild(contentDiv);
+      div.appendChild(removeBtn);
+      imageList.appendChild(div);
+    });
+  }
+
+  // Update AI Results to include actions
+  function renderAiResults(tweets) {
+    aiResults.innerHTML = '';
+    tweets.forEach((text, index) => {
+      const div = document.createElement('div');
+      div.className = 'ai-tweet-item';
+
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+
+      const actions = document.createElement('div');
+      actions.className = 'ai-tweet-actions';
+
+      // Add Emoji/Hashtag actions to AI tweets too
+      const inputActions = createInputActions(textarea);
+      inputActions.style.marginRight = 'auto'; // Push remove button to right
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'small-btn';
+      removeBtn.textContent = 'Remove';
+      removeBtn.style.color = 'var(--error-color)';
+      removeBtn.onclick = () => div.remove();
+
+      actions.appendChild(inputActions);
+      actions.appendChild(removeBtn);
+      div.appendChild(textarea);
+      div.appendChild(actions);
+      aiResults.appendChild(div);
     });
   }
 });

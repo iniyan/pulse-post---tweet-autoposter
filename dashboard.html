@@ -51,6 +51,10 @@
     <div id="aiTab" class="tab-content">
       <div class="ai-controls">
         <div class="input-group">
+          <label for="apiKey">OpenRouter API Key</label>
+          <input type="text" id="apiKey" placeholder="sk-or-v1-..." type="password">
+        </div>
+        <div class="input-group">
           <label for="aiPrompt">Prompt / Keywords / Requirements</label>
           <textarea id="aiPrompt" placeholder="E.g., Write 5 funny tweets about programming..."></textarea>
         </div>
@@ -103,6 +107,8 @@
         <div class="actions bento-item">
           <button id="startBtn" disabled>Start Posting</button>
           <button id="stopBtn" disabled>Stop</button>
+          <button id="clearAllBtn" class="secondary-btn"
+            style="color: var(--error-color); border-color: var(--error-color); margin-left: auto;">Clear Queue</button>
         </div>
 
         <div class="status-section bento-item">
